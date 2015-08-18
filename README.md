@@ -18,13 +18,19 @@ docker run -v DIRECTORY_TO_BACKUP:/data:ro inanimate/s3-archive
 ```
 
 #### Environment variables
+
+##### *Required*
+
+* `AWS_ACCESS_KEY_ID` - AWS S3 access key.
+* `AWS_SECRET_ACCESS_KEY` - AWS S3 secret key.
+* `BUCKET` - AWS S3 bucket (and folder) to store the backup. i.e. `s3://herpderpbucket/folder`
+* `SYMMETRIC_PASSPHRASE` - The gpg symmetric passphrase to use to encrypt your file.
+
+##### *Optional*
+
 * `TIMEOUT` - how often perform backup, in seconds. (default: `86400`)
-* `AWS_ACCESS_KEY_ID` - AWS S3 access key. *Required*
-* `AWS_SECRET_ACCESS_KEY` - AWS S3 secret key. *Required*
-* `BUCKET` - AWS S3 bucket (and folder) to store the backup. i.e. `s3://herpderpbucket/folder` *Required*
 * `DATADIR` - The data directory inside the container to archive. (default: `/data`)
 * `NAME_PREFIX` - A prefix in front of the date i.e. `jira-data-dir-backup` (default: `backup-archive`)
-* `SYMMETRIC_PASSPHRASE` - The gpg symmetric passphrase to use to encrypt your file. *Required*
 * `GPG_COMPRESSION_LEVEL` - The compression level for gpg to use (0-9). (default: `0`; *not recommended since we're using xz*)
 * `XZ_COMPRESSION_LEVEL` - The compression level for xz (lzma2) to use (0-9). (default: `9`; *this is the best compression level*)
 * `CIPHER_ALGO` - The cipher for gpg to utilize when encrypting your archive. (default: `aes256`)
