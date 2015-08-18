@@ -1,0 +1,57 @@
+#!/bin/bash -e
+
+if [ -z "$AWS_ACCESS_KEY_ID" ] ; then
+    echo "AWS_ACCESS_KEY_ID not specified"
+    exit 1
+fi
+
+if [ -z "$AWS_SECRET_ACCESS_KEY" ] ; then
+    echo "AWS_SECRET_ACCESS_KEY not specified"
+    exit 1
+fi
+
+if [ -z "$BUCKET" ] ; then
+    echo "BUCKET not specified"
+    exit 1
+fi
+
+if [ -z "$SYMMETRIC_PASSPHRASE" ]; then
+    echo "SYMMETRIC_PASSPHRASE not specified"
+    exit 1
+fi
+
+
+TIMEOUT=${TIMEOUT:-86400}
+DATADIR=${DATADIR:-/data}
+XZ_COMPRESSION_LEVEL=${XZ_COMPRESSION_LEVEL:-9}
+CIPHER_ALGO=${CIPHER_ALGO:-aes256}
+GPG_COMPRESSION_LEVEL=${GPG_COMPRESSION_LEVEL:-0}
+NAME_PREFIX=${NAME_PREFIX:-backup-archive}
+EXTENSION=${EXTENSION:-.tar.xz.gpg}
+
+backup_and_stream_to_s3() {
+  while true
+  do
+    #echo "Clean"
+    #rm -rf /backup/*
+    #echo "Backup"
+    #cp -r $DATADIR/* /backup
+
+    BACKUP="${NAME_PREFIX}_`date +"%Y-%m-%d_%H-%M"`${EXTENSION}"
+    echo "Set backup file name to: $BACKUP"
+    #tar -cf /backup/$BACKUP.tar /backup/*
+    #gzip -7 /backup/$BACKUP.tar
+    echo "Starting backup.."
+    tar cpf - --numeric-owner ${DATADIR} | xz -${XZ_COMPRESSION_LEVEL} -zf - | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --passphrase "${SYMMETRIC_PASSPHRASE}" | aws s3 cp - "${BUCKET}/${BACKUP}" "${AWSCLI_OPTIONS}"
+    echo "Backup finished! Sleeping ${TIMEOUT}s"
+    #echo "Upload $BACKUP"
+    #aws s3 cp "/backup/$BACKUP.tar.gz" $BUCKET/$BACKUP.tar.gz
+
+    #echo "Sleep"
+    sleep $TIMEOUT
+  done
+}
+
+backup_and_stream_to_s3
+
+wait

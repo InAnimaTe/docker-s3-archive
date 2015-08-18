@@ -1,0 +1,11 @@
+s3-archive:
+    image: inanimate/s3-archive
+    volumes:
+        - /home/username:/data
+    environment:
+        - "AWS_ACCESS_KEY_ID=INSERTACCESSKEYHERE"
+        - "AWS_SECRET_ACCESS_KEY=SUPERDUPERLONGSECRETKEY"
+        - "BUCKET=s3://herpderplolcakesbr0"
+        - "SYMMETRIC_PASSPHRASE=example"
+        - "AWSCLI_OPTIONS=--sse"
+        - "NAME_PREFIX=hellzyeah-backups-br0"
