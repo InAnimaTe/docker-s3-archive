@@ -28,14 +28,14 @@ docker run -v DIRECTORY_TO_BACKUP:/data:ro inanimate/s3-archive
 
 ##### *Optional*
 
-* `TIMEOUT` - how often perform backup, in seconds. (default: `86400`)
 * `DATADIR` - The data directory inside the container to archive. (default: `/data`)
+* `TIMEOUT` - How often perform backup, in seconds. (default: `86400`)
 * `NAME_PREFIX` - A prefix in front of the date i.e. `jira-data-dir-backup` (default: `backup-archive`)
 * `GPG_COMPRESSION_LEVEL` - The compression level for gpg to use (0-9). (default: `0`; *not recommended since we're using xz*)
 * `XZ_COMPRESSION_LEVEL` - The compression level for xz (lzma2) to use (0-9). (default: `9`; *this is the best compression level*)
 * `CIPHER_ALGO` - The cipher for gpg to utilize when encrypting your archive. (default: `aes256`)
-* `EXTENSION` - The extension to use for the backup file i.e. `tgz,tar.xz,bz2` (default: `tar.xz.gpg`)
-* `AWSCLI_OPTIONS` - Provide some arguments to awscli i.e. `--sse` See [here](http://docs.aws.amazon.com/cli/latest/reference/s3/cp.html) for possibilities.
+* `EXTENSION` - The extension to use for the backup file i.e. `tgz,tar.xz,bz2` (default: `.tar.xz.gpg`)
+* `AWSCLI_OPTIONS` - Provide some arguments to awscli (default: `--sse`; *[enabling server side encryption](http://docs.aws.amazon.com/AmazonS3/latest/dev/serv-side-encryption.html)*) See [here](http://docs.aws.amazon.com/cli/latest/reference/s3/cp.html) for possibilities.
 
 > All other [aws-cli](https://github.com/aws/aws-cli) variables are also supported.
 
@@ -46,17 +46,5 @@ docker run -v DIRECTORY_TO_BACKUP:/data:ro inanimate/s3-archive
 * One day, I'll implement asymmetric encryption so you can use your gpg keys. For now, [this](https://hub.docker.com/r/siomiz/postgresql-s3/) image does...maybe you could make your own ;P
 
 
-> **Restorability has not yet been completed. The following does not work.**
+> **Restorability has not yet been completed. It is on the roadmap!**
 
-### Restore backup
-Restore file from S3.
-
-```
-docker run -v DIRECTORY_TO_RESTORE_TO:/data gregory90/file-backup-s3 /app/restore
-```
-
-##### Environment variables
-ACCESS_KEY - AWS S3 access key,  
-SECRET_KEY - AWS S3 secret key,  
-FILE - file to restore (without extension),  
-BUCKET - AWS S3 bucket for backup.
