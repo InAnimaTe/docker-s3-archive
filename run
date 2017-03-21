@@ -15,6 +15,9 @@ NAME_PREFIX=${NAME_PREFIX:-backup-archive}
 EXTENSION=${EXTENSION:-.tar.xz.gpg}
 AWSCLI_OPTIONS=${AWSCLI_OPTIONS:---sse}
 
+# Insert an artificial sleep which helps when waiting for an app to write data
+sleep 10s
+
 backup_and_stream_to_s3() {
   while true
   do
