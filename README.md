@@ -36,6 +36,8 @@ docker run -v DIRECTORY_TO_BACKUP:/data:ro inanimate/s3-archive
 * `CIPHER_ALGO` - The cipher for gpg to utilize when encrypting your archive. (default: `aes256`)
 * `EXTENSION` - The extension to use for the backup file i.e. `tgz,tar.xz,bz2` (default: `.tar.xz.gpg`)
 * `AWSCLI_OPTIONS` - Provide some arguments to awscli (default: `--sse`; *[enabling server side encryption](http://docs.aws.amazon.com/AmazonS3/latest/dev/serv-side-encryption.html)*) See [here](http://docs.aws.amazon.com/cli/latest/reference/s3/cp.html) for possibilities.
+* `TAR_EXCLUDE` - Include `--exclude` statements for content you don't want
+  included in the backup.
 
 > All other [aws-cli](https://github.com/aws/aws-cli) variables are also supported.
 
