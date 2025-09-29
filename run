@@ -1,35 +1,102 @@
-#!/bin/bash -e
+#!/bin/bash
+set -euo pipefail
 
-: ${AWS_ACCESS_KEY_ID:?"AWS_ACCESS_KEY_ID not specified"} 
-: ${AWS_SECRET_ACCESS_KEY:?"AWS_SECRET_ACCESS_KEY not specified"} 
-: ${BUCKET:?"BUCKET not specified"} 
-: ${SYMMETRIC_PASSPHRASE:?"SYMMETRIC_PASSPHRASE not specified"} 
+# ===== Helper: normalize yes/no/true/false =====
+normalize_bool() {
+  case "${1,,}" in
+    yes|true|1)  echo 1 ;;
+    no|false|0)  echo 0 ;;
+    *)           echo 0 ;;  # default to off if invalid
+  esac
+}
 
+# ===== Defaults / Opt-ins =====
 DATADIR=${DATADIR:-/data}
-
 TIMEOUT=${TIMEOUT:-86400}
 XZ_COMPRESSION_LEVEL=${XZ_COMPRESSION_LEVEL:-9}
 CIPHER_ALGO=${CIPHER_ALGO:-aes256}
 GPG_COMPRESSION_LEVEL=${GPG_COMPRESSION_LEVEL:-0}
 NAME_PREFIX=${NAME_PREFIX:-backup-archive}
-EXTENSION=${EXTENSION:-.tar.xz.gpg}
+
+ENABLE_GPG=$(normalize_bool "${ENABLE_GPG:-yes}")   # default = yes
+ENABLE_AWS=$(normalize_bool "${ENABLE_AWS:-yes}")   # default = yes
+OUTPUT_DIR=${OUTPUT_DIR:-}                          # optional
+
+# EXTENSION defaults adapt to encryption unless user overrides
+if [[ -z "${EXTENSION+x}" ]]; then
+  if [[ "${ENABLE_GPG}" = "1" ]]; then
+    EXTENSION=".tar.xz.gpg"
+  else
+    EXTENSION=".tar.xz"
+  fi
+fi
+
 AWSCLI_OPTIONS=${AWSCLI_OPTIONS:---sse}
 
-# Insert an artificial sleep which helps when waiting for an app to write data
+# ===== Conditional validations (only when features are enabled) =====
+if [[ "${ENABLE_AWS}" = "1" ]]; then
+  : ${AWS_ACCESS_KEY_ID:?"AWS_ACCESS_KEY_ID not specified"}
+  : ${AWS_SECRET_ACCESS_KEY:?"AWS_SECRET_ACCESS_KEY not specified"}
+  : ${BUCKET:?"BUCKET not specified"}    # e.g., s3://bucket/path
+fi
+
+if [[ "${ENABLE_GPG}" = "1" ]]; then
+  : ${SYMMETRIC_PASSPHRASE:?"SYMMETRIC_PASSPHRASE not specified"}
+fi
+
+if [[ -n "${OUTPUT_DIR}" ]]; then
+  if [[ ! -d "${OUTPUT_DIR}" ]]; then
+    echo "ERROR: OUTPUT_DIR '${OUTPUT_DIR}' does not exist. Please create it first." >&2
+    exit 1
+  fi
+fi
+
+# Small grace to let apps finish writes, preserving your original behavior
 sleep 10s
 
-backup_and_stream_to_s3() {
-  while true
-  do
-    BACKUP="${NAME_PREFIX}_`date +"%Y-%m-%d_%H-%M"`${EXTENSION}"
-    echo "Set backup file name to: $BACKUP"
-    echo "Starting backup.."
-    tar cpf - --numeric-owner ${TAR_EXCLUDE} ${DATADIR} | xz -${XZ_COMPRESSION_LEVEL} -zf - | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --passphrase "${SYMMETRIC_PASSPHRASE}" | aws s3 cp - "${BUCKET}/${BACKUP}" "${AWSCLI_OPTIONS}"
-    echo "Backup finished! Sleeping ${TIMEOUT}s"
-    sleep $TIMEOUT
+backup_once() {
+  local ts backup
+  ts="$(date +"%Y-%m-%d_%H-%M")"
+  backup="${NAME_PREFIX}_${ts}${EXTENSION}"
+  echo "Set backup file name to: ${backup}"
+  echo "Starting backup.."
+
+  base_cmd=( tar cpf - --numeric-owner ${TAR_EXCLUDE:-} "${DATADIR}" )
+  xz_cmd=( xz -"${XZ_COMPRESSION_LEVEL}" -zf - )
+
+  # Optional GPG stage
+  if [[ "${ENABLE_GPG}" = "1" ]]; then
+    gpg_cmd=( gpg -c --cipher-algo "${CIPHER_ALGO}" -z "${GPG_COMPRESSION_LEVEL}" \
+              --batch --yes --pinentry-mode loopback --passphrase "${SYMMETRIC_PASSPHRASE}" )
+  else
+    gpg_cmd=()
+  fi
+
+  # Output selection
+  if [[ -n "${OUTPUT_DIR}" && "${ENABLE_AWS}" = "1" ]]; then
+    ( "${base_cmd[@]}" | "${xz_cmd[@]}" ${gpg_cmd:+| "${gpg_cmd[@]}"} \
+      | tee "${OUTPUT_DIR}/${backup}" \
+      | aws s3 cp - "${BUCKET%/}/${backup}" ${AWSCLI_OPTIONS} )
+  elif [[ -n "${OUTPUT_DIR}" && "${ENABLE_AWS}" != "1" ]]; then
+    ( "${base_cmd[@]}" | "${xz_cmd[@]}" ${gpg_cmd:+| "${gpg_cmd[@]}"} > "${OUTPUT_DIR}/${backup}" )
+  elif [[ -z "${OUTPUT_DIR}" && "${ENABLE_AWS}" = "1" ]]; then
+    ( "${base_cmd[@]}" | "${xz_cmd[@]}" ${gpg_cmd:+| "${gpg_cmd[@]}"} \
+      | aws s3 cp - "${BUCKET%/}/${backup}" ${AWSCLI_OPTIONS} )
+  else
+    echo "ERROR: No output selected (ENABLE_AWS=no and OUTPUT_DIR unset). Nothing to do." >&2
+    return 1
+  fi
+
+  echo "Backup finished!"
+}
+
+backup_loop() {
+  while true; do
+    backup_once
+    echo "Sleeping ${TIMEOUT}s"
+    sleep "${TIMEOUT}"
   done
 }
 
-backup_and_stream_to_s3
-
+backup_loop
 wait
