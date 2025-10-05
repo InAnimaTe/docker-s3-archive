@@ -1,4 +1,5 @@
-#!/bin/bash -e
+#!/bin/bash
+set -euo pipefail
 
 : ${AWS_ACCESS_KEY_ID:?"AWS_ACCESS_KEY_ID not specified"} 
 : ${AWS_SECRET_ACCESS_KEY:?"AWS_SECRET_ACCESS_KEY not specified"} 
@@ -15,16 +16,40 @@ NAME_PREFIX=${NAME_PREFIX:-backup-archive}
 EXTENSION=${EXTENSION:-.tar.xz.gpg}
 AWSCLI_OPTIONS=${AWSCLI_OPTIONS:---sse}
 
+# NEW: optional unencrypted local copy location (must already exist)
+LOCAL_ARCHIVE_PATH=${LOCAL_ARCHIVE_PATH:-}
+
 # Insert an artificial sleep which helps when waiting for an app to write data
 sleep 10s
 
 backup_and_stream_to_s3() {
   while true
   do
-    BACKUP="${NAME_PREFIX}_`date +"%Y-%m-%d_%H-%M"`${EXTENSION}"
+    TS="$(date +"%Y-%m-%d_%H-%M")"
+    BACKUP="${NAME_PREFIX}_${TS}${EXTENSION}"
+    LOCAL_FILE="${NAME_PREFIX}_${TS}.tar.xz"
+
     echo "Set backup file name to: $BACKUP"
-    echo "Starting backup.."
-    tar cpf - --numeric-owner ${TAR_EXCLUDE} ${DATADIR} | xz -${XZ_COMPRESSION_LEVEL} -zf - | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --passphrase "${SYMMETRIC_PASSPHRASE}" | aws s3 cp - "${BUCKET}/${BACKUP}" "${AWSCLI_OPTIONS}"
+    if [[ -n "$LOCAL_ARCHIVE_PATH" ]]; then
+      if [[ ! -d "$LOCAL_ARCHIVE_PATH" ]]; then
+        echo "ERROR: LOCAL_ARCHIVE_PATH '$LOCAL_ARCHIVE_PATH' does not exist." >&2
+        exit 1
+      fi
+      echo "Also writing unencrypted local copy to: ${LOCAL_ARCHIVE_PATH%/}/${LOCAL_FILE}"
+      # Build tar|xz ONCE, tee to local file, continue to GPG → S3
+      tar cpf - --numeric-owner ${TAR_EXCLUDE} ${DATADIR} \
+        | xz -${XZ_COMPRESSION_LEVEL} -zf - \
+        | tee "${LOCAL_ARCHIVE_PATH%/}/${LOCAL_FILE}" \
+        | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --batch --yes --pinentry-mode loopback --passphrase "${SYMMETRIC_PASSPHRASE}" \
+        | aws s3 cp - "${BUCKET}/${BACKUP}" "${AWSCLI_OPTIONS}"
+    else
+      echo "Starting backup.."
+      tar cpf - --numeric-owner ${TAR_EXCLUDE} ${DATADIR} \
+        | xz -${XZ_COMPRESSION_LEVEL} -zf - \
+        | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --batch --yes --pinentry-mode loopback --passphrase "${SYMMETRIC_PASSPHRASE}" \
+        | aws s3 cp - "${BUCKET}/${BACKUP}" "${AWSCLI_OPTIONS}"
+    fi
+
     echo "Backup finished! Sleeping ${TIMEOUT}s"
     sleep $TIMEOUT
   done
