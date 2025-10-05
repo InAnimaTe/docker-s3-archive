@@ -40,13 +40,13 @@ backup_and_stream_to_s3() {
       tar cpf - --numeric-owner ${TAR_EXCLUDE} ${DATADIR} \
         | xz -${XZ_COMPRESSION_LEVEL} -zf - \
         | tee "${LOCAL_ARCHIVE_PATH%/}/${LOCAL_FILE}" \
-        | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --passphrase "${SYMMETRIC_PASSPHRASE}" \
+        | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --batch --yes --pinentry-mode loopback --passphrase "${SYMMETRIC_PASSPHRASE}" \
         | aws s3 cp - "${BUCKET}/${BACKUP}" "${AWSCLI_OPTIONS}"
     else
       echo "Starting backup.."
       tar cpf - --numeric-owner ${TAR_EXCLUDE} ${DATADIR} \
         | xz -${XZ_COMPRESSION_LEVEL} -zf - \
-        | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --passphrase "${SYMMETRIC_PASSPHRASE}" \
+        | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --batch --yes --pinentry-mode loopback --passphrase "${SYMMETRIC_PASSPHRASE}" \
         | aws s3 cp - "${BUCKET}/${BACKUP}" "${AWSCLI_OPTIONS}"
     fi
 
