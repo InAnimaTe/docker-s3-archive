@@ -17,7 +17,7 @@ jobs:
     steps:
     - name: Set Image Tag
       run: |
-        if [[ $GITHUB_REF_NAME == 'main' ]]; then
+        if [[ $GITHUB_REF_NAME == 'main' || $GITHUB_REF_NAME == 'master' ]]; then
           echo "IMAGE_TAG=latest" >> "$GITHUB_ENV"
         else
           echo "IMAGE_TAG=$GITHUB_REF_NAME" >> "$GITHUB_ENV"
