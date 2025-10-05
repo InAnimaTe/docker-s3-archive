@@ -14,6 +14,7 @@ CIPHER_ALGO=${CIPHER_ALGO:-aes256}
 GPG_COMPRESSION_LEVEL=${GPG_COMPRESSION_LEVEL:-0}
 NAME_PREFIX=${NAME_PREFIX:-backup-archive}
 EXTENSION=${EXTENSION:-.tar.xz.gpg}
+TAR_EXCLUDE="${TAR_EXCLUDE:-}"
 AWSCLI_OPTIONS=${AWSCLI_OPTIONS:---sse}
 
 # NEW: optional unencrypted local copy location (must already exist)
