@@ -6,6 +6,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Add AWS CLI v2 to PATH
 ENV PATH="/usr/local/aws-cli/v2/current/bin:${PATH}"
 
+ENV GPG_TTY="" GNUPGHOME="/root/.gnupg"
+
 # Install only what we need:
 # - bash: your script uses #!/bin/bash
 # - gnupg: for encryption
@@ -16,7 +18,11 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       bash gnupg xz-utils tar \
       curl unzip ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p ${GNUPGHOME} && \
+    echo 'allow-loopback-pinentry' > ${GNUPGHOME}/gpg-agent.conf && \
+    chmod 700 ${GNUPGHOME} && \
+    chmod 600 ${GNUPGHOME}/gpg-agent.conf
 
 # Install AWS CLI v2 (no Python; self-contained)
 # NOTE: You can pin a version by setting AWSCLI_VERSION (e.g., 2.17.56)
