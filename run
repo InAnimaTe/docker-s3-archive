@@ -38,14 +38,14 @@ backup_and_stream_to_s3() {
       fi
       echo "Also writing unencrypted local copy to: ${LOCAL_ARCHIVE_PATH%/}/${LOCAL_FILE}"
       # Build tar|xz ONCE, tee to local file, continue to GPG → S3
-      tar cpf - --numeric-owner ${TAR_EXCLUDE} ${DATADIR} \
+      tar cpf - --numeric-owner --warning=no-file-changed --ignore-failed-read ${TAR_EXCLUDE} ${DATADIR} \
         | xz -${XZ_COMPRESSION_LEVEL} -zf - \
         | tee "${LOCAL_ARCHIVE_PATH%/}/${LOCAL_FILE}" \
         | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --batch --yes --pinentry-mode loopback --passphrase "${SYMMETRIC_PASSPHRASE}" \
         | aws s3 cp - "${BUCKET}/${BACKUP}" "${AWSCLI_OPTIONS}"
     else
       echo "Starting backup.."
-      tar cpf - --numeric-owner ${TAR_EXCLUDE} ${DATADIR} \
+      tar cpf - --numeric-owner --warning=no-file-changed --ignore-failed-read ${TAR_EXCLUDE} ${DATADIR} \
         | xz -${XZ_COMPRESSION_LEVEL} -zf - \
         | gpg -c --cipher-algo ${CIPHER_ALGO} -z ${GPG_COMPRESSION_LEVEL} --batch --yes --pinentry-mode loopback --passphrase "${SYMMETRIC_PASSPHRASE}" \
         | aws s3 cp - "${BUCKET}/${BACKUP}" "${AWSCLI_OPTIONS}"
