@@ -1,12 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-# ===== Helper: normalize yes/no/true/false =====
+# ===== Helpers =====
 normalize_bool() {
   case "${1,,}" in
     yes|true|1)  echo 1 ;;
     no|false|0)  echo 0 ;;
-    *)           echo 0 ;;  # default to off if invalid
+    *)           echo 0 ;;
   esac
 }
 
@@ -17,30 +17,36 @@ XZ_COMPRESSION_LEVEL=${XZ_COMPRESSION_LEVEL:-9}
 CIPHER_ALGO=${CIPHER_ALGO:-aes256}
 GPG_COMPRESSION_LEVEL=${GPG_COMPRESSION_LEVEL:-0}
 NAME_PREFIX=${NAME_PREFIX:-backup-archive}
-
-ENABLE_GPG=$(normalize_bool "${ENABLE_GPG:-yes}")   # default = yes
-ENABLE_AWS=$(normalize_bool "${ENABLE_AWS:-yes}")   # default = yes
-OUTPUT_DIR=${OUTPUT_DIR:-}                          # optional
-
-# EXTENSION defaults adapt to encryption unless user overrides
-if [[ -z "${EXTENSION+x}" ]]; then
-  if [[ "${ENABLE_GPG}" = "1" ]]; then
-    EXTENSION=".tar.xz.gpg"
-  else
-    EXTENSION=".tar.xz"
-  fi
-fi
-
+OUTPUT_DIR=${OUTPUT_DIR:-}   # optional, must pre-exist if set
 AWSCLI_OPTIONS=${AWSCLI_OPTIONS:---sse}
 
-# ===== Conditional validations (only when features are enabled) =====
+# Encryption toggles (global + per-sink overrides)
+ENABLE_GPG=$(normalize_bool "${ENABLE_GPG:-yes}")                    # preserve original default
+ENABLE_GPG_AWS=$(normalize_bool "${ENABLE_GPG_AWS:-${ENABLE_GPG}}")
+ENABLE_GPG_LOCAL=$(normalize_bool "${ENABLE_GPG_LOCAL:-${ENABLE_GPG}}")
+
+# Output toggles (AWS is on by default to preserve original behavior)
+ENABLE_AWS=$(normalize_bool "${ENABLE_AWS:-yes}")
+
+# Extensions:
+#   - If EXTENSION is explicitly set, use it for BOTH outputs (your override).
+#   - Otherwise pick per-sink based on that sink's encryption setting.
+if [[ -n "${EXTENSION+x}" ]]; then
+  EXTENSION_AWS="${EXTENSION}"
+  EXTENSION_LOCAL="${EXTENSION}"
+else
+  EXTENSION_AWS=$([[ "$ENABLE_GPG_AWS" = "1" ]] && echo ".tar.xz.gpg" || echo ".tar.xz")
+  EXTENSION_LOCAL=$([[ "$ENABLE_GPG_LOCAL" = "1" ]] && echo ".tar.xz.gpg" || echo ".tar.xz")
+fi
+
+# ===== Validations (feature-conditional) =====
 if [[ "${ENABLE_AWS}" = "1" ]]; then
   : ${AWS_ACCESS_KEY_ID:?"AWS_ACCESS_KEY_ID not specified"}
   : ${AWS_SECRET_ACCESS_KEY:?"AWS_SECRET_ACCESS_KEY not specified"}
   : ${BUCKET:?"BUCKET not specified"}    # e.g., s3://bucket/path
 fi
 
-if [[ "${ENABLE_GPG}" = "1" ]]; then
+if [[ "${ENABLE_GPG_AWS}" = "1" || "${ENABLE_GPG_LOCAL}" = "1" ]]; then
   : ${SYMMETRIC_PASSPHRASE:?"SYMMETRIC_PASSPHRASE not specified"}
 fi
 
@@ -51,37 +57,71 @@ if [[ -n "${OUTPUT_DIR}" ]]; then
   fi
 fi
 
-# Small grace to let apps finish writes, preserving your original behavior
+# Small grace to let apps finish writes (preserve your original behavior)
 sleep 10s
 
 backup_once() {
-  local ts backup
+  local ts base backup_local backup_aws
   ts="$(date +"%Y-%m-%d_%H-%M")"
-  backup="${NAME_PREFIX}_${ts}${EXTENSION}"
-  echo "Set backup file name to: ${backup}"
+  base="${NAME_PREFIX}_${ts}"
+  backup_local="${base}${EXTENSION_LOCAL}"
+  backup_aws="${base}${EXTENSION_AWS}"
+
   echo "Starting backup.."
+  echo "  Local filename (if used): ${backup_local}"
+  echo "  AWS   filename (if used): ${backup_aws}"
 
   base_cmd=( tar cpf - --numeric-owner ${TAR_EXCLUDE:-} "${DATADIR}" )
   xz_cmd=( xz -"${XZ_COMPRESSION_LEVEL}" -zf - )
+  gpg_cmd=( gpg -c --cipher-algo "${CIPHER_ALGO}" -z "${GPG_COMPRESSION_LEVEL}" \
+            --batch --yes --pinentry-mode loopback --passphrase "${SYMMETRIC_PASSPHRASE}" )
 
-  # Optional GPG stage
-  if [[ "${ENABLE_GPG}" = "1" ]]; then
-    gpg_cmd=( gpg -c --cipher-algo "${CIPHER_ALGO}" -z "${GPG_COMPRESSION_LEVEL}" \
-              --batch --yes --pinentry-mode loopback --passphrase "${SYMMETRIC_PASSPHRASE}" )
-  else
-    gpg_cmd=()
-  fi
-
-  # Output selection
+  # Build the xz stream once
+  # We branch AFTER xz so we can keep local unencrypted while encrypting the AWS stream.
   if [[ -n "${OUTPUT_DIR}" && "${ENABLE_AWS}" = "1" ]]; then
-    ( "${base_cmd[@]}" | "${xz_cmd[@]}" ${gpg_cmd:+| "${gpg_cmd[@]}"} \
-      | tee "${OUTPUT_DIR}/${backup}" \
-      | aws s3 cp - "${BUCKET%/}/${backup}" ${AWSCLI_OPTIONS} )
+    # —— Both local and AWS ——
+    if [[ "${ENABLE_GPG_LOCAL}" = "0" && "${ENABLE_GPG_AWS}" = "1" ]]; then
+      # Local (plain .tar.xz), AWS (GPG)
+      ( "${base_cmd[@]}" | "${xz_cmd[@]}" \
+        | tee "${OUTPUT_DIR%/}/${backup_local}" \
+        | "${gpg_cmd[@]}" \
+        | aws s3 cp - "${BUCKET%/}/${backup_aws}" ${AWSCLI_OPTIONS} )
+    elif [[ "${ENABLE_GPG_LOCAL}" = "1" && "${ENABLE_GPG_AWS}" = "0" ]]; then
+      # Local (GPG), AWS (plain)
+      # Need a split: encrypt the tee'd branch for local, leave main branch plain for AWS
+      ( "${base_cmd[@]}" | "${xz_cmd[@]}" \
+        | tee >( "${gpg_cmd[@]}" > "${OUTPUT_DIR%/}/${backup_local}" ) \
+        | aws s3 cp - "${BUCKET%/}/${backup_aws}" ${AWSCLI_OPTIONS} )
+    elif [[ "${ENABLE_GPG_LOCAL}" = "1" && "${ENABLE_GPG_AWS}" = "1" ]]; then
+      # Both encrypted
+      ( "${base_cmd[@]}" | "${xz_cmd[@]}" \
+        | "${gpg_cmd[@]}" \
+        | tee "${OUTPUT_DIR%/}/${backup_local}" \
+        | aws s3 cp - "${BUCKET%/}/${backup_aws}" ${AWSCLI_OPTIONS} )
+    else
+      # Both unencrypted
+      ( "${base_cmd[@]}" | "${xz_cmd[@]}" \
+        | tee "${OUTPUT_DIR%/}/${backup_local}" \
+        | aws s3 cp - "${BUCKET%/}/${backup_aws}" ${AWSCLI_OPTIONS} )
+    fi
+
   elif [[ -n "${OUTPUT_DIR}" && "${ENABLE_AWS}" != "1" ]]; then
-    ( "${base_cmd[@]}" | "${xz_cmd[@]}" ${gpg_cmd:+| "${gpg_cmd[@]}"} > "${OUTPUT_DIR}/${backup}" )
+    # —— Local only ——
+    if [[ "${ENABLE_GPG_LOCAL}" = "1" ]]; then
+      ( "${base_cmd[@]}" | "${xz_cmd[@]}" | "${gpg_cmd[@]}" > "${OUTPUT_DIR%/}/${backup_local}" )
+    else
+      ( "${base_cmd[@]}" | "${xz_cmd[@]}" > "${OUTPUT_DIR%/}/${backup_local}" )
+    fi
+
   elif [[ -z "${OUTPUT_DIR}" && "${ENABLE_AWS}" = "1" ]]; then
-    ( "${base_cmd[@]}" | "${xz_cmd[@]}" ${gpg_cmd:+| "${gpg_cmd[@]}"} \
-      | aws s3 cp - "${BUCKET%/}/${backup}" ${AWSCLI_OPTIONS} )
+    # —— AWS only (original default path) ——
+    if [[ "${ENABLE_GPG_AWS}" = "1" ]]; then
+      ( "${base_cmd[@]}" | "${xz_cmd[@]}" | "${gpg_cmd[@]}" \
+        | aws s3 cp - "${BUCKET%/}/${backup_aws}" ${AWSCLI_OPTIONS} )
+    else
+      ( "${base_cmd[@]}" | "${xz_cmd[@]}" \
+        | aws s3 cp - "${BUCKET%/}/${backup_aws}" ${AWSCLI_OPTIONS} )
+    fi
   else
     echo "ERROR: No output selected (ENABLE_AWS=no and OUTPUT_DIR unset). Nothing to do." >&2
     return 1
