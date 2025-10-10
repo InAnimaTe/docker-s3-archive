@@ -29,6 +29,7 @@ docker run -v DIRECTORY_TO_BACKUP:/data:ro inanimate/s3-archive
 ##### *Optional*
 
 * `DATADIR` - The data directory inside the container to archive. (default: `/data`)
+* `LOCAL_ARCHIVE_PATH` - Local filesystem path to write the unecrypted archive before continuing to encrypt+upload to aws
 * `TIMEOUT` - How often perform backup, in seconds. (default: `86400`)
 * `NAME_PREFIX` - A prefix in front of the date i.e. `jira-data-dir-backup` (default: `backup-archive`)
 * `GPG_COMPRESSION_LEVEL` - The compression level for gpg to use (0-9). (default: `0`; *not recommended since we're using xz*)
